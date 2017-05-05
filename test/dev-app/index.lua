@@ -7,5 +7,3 @@ local sailor = require "sailor"
 sailor.path = base_dir
 sailor.launch()
 
---装逼，测试头像
---这回真得有头像了

@@ -1,5 +1,5 @@
 --------------------------------------------------------------------------------
--- sailor.lua, v0.5.3: core functionalities of the framework
+-- sailor.lua, v0.5.0: core functionalities of the framework
 -- This file is a part of Sailor project
 -- Copyright (c) 2014 Etiene Dalcol <dalcol@etiene.net>
 -- License: MIT
@@ -13,7 +13,7 @@ local sailor = {
     conf = conf.sailor,
     _COPYRIGHT = "Copyright (C) 2014-2015 Etiene Dalcol",
     _DESCRIPTION = "Sailor is a framework for creating MVC web applications.",
-    _VERSION = require "sailor.version",
+    _VERSION = "Sailor 0.5.0",
 }
 
 -- Loads Lua@client's settings from Sailor conf.
@@ -21,7 +21,7 @@ local sailor = {
 local lp = require "web_utils.lp_ex"
 lp.lat.conf.lua_at_client = conf.lua_at_client or require"latclient.conf".lua_at_client
 
-local lfs = require "lfs"
+-- local lfs = require "lfs"
 local match, traceback,xpcall = string.match, debug.traceback,xpcall
 local httpd = {}
 
@@ -52,14 +52,14 @@ end
 
 -- Stores the path of the application in sailor.path
 function sailor.set_application_path(r)
-    if r.filename then
-        local new_path = r.filename:match("^@?(.*)/")
-        if new_path and new_path ~= "." then
-            sailor.path = new_path
-            return
-        end
-    end
-    sailor.path = lfs.currentdir()
+    -- if r.uri and r.filename then
+    --     local filename = r.uri:match( "([^/]+)$") 
+    --     if filename then
+    --         sailor.path = r.filename:match("^@?(.-)/"..filename.."$")
+    --         return
+    --     end
+    -- end
+    -- sailor.path = ((debug.getinfo(1).source):match('^@?(.-)index.lua$') or '')
 end
 
 -- Encapsulates request_rec functions inside the Page object
@@ -74,9 +74,9 @@ function sailor.init(r)
 
     local GET, GETMULTI = {}, {}
     local POST, POSTMULTI = {}, {}
-    if r.parsebody ~= nil then -- only present in Apache 2.4.3 or higher
-        POST, POSTMULTI = r:parsebody(conf.sailor.max_upload or nil)
-    end
+    -- if r.parsebody ~= nil then -- only present in Apache 2.4.3 or higher
+    --     POST, POSTMULTI = r:parsebody(conf.sailor.max_upload or nil)
+    -- end
     if r.parseargs ~= nil then
         GET, GETMULTI = r:parseargs()
     end
@@ -94,6 +94,7 @@ function sailor.init(r)
     if conf.extensions and conf.extensions.enable then
         for _,e in pairs(conf.extensions.enable) do
             package.path = 'extensions/' .. e .. '/?.lua;' .. package.path
+            local c = require "controllers.user"
         end
     end
 
@@ -133,31 +134,30 @@ end
 -- Reads route GET var to decide which controller/action or default page to run.
 -- page: Page object with utilitary functions and request
 function sailor.route(page)
-    local error_404, error_handler
 
     apache_friendly_url(page)
 
     local route_name = page.GET[conf.sailor.route_parameter]
 
-    -- Error for controller or action not found
-    error_404 = function()
-        local _, res
-        if sailor.conf.default_error404 and sailor.conf.default_error404 ~= '' then
-            page.controller_view_path = nil
-            _, res = xpcall(function () page:render(sailor.conf.default_error404) end, error_handler)
-            return res or httpd.OK or page.r.status or 200
-        end
-        page.r.status = 404
-        return res or page.r.status
-    end
     -- Encapsulated error function for showing detailed traceback
     -- Needs improvement
-    error_handler = function (msg)
+    local function error_handler(msg)
         if sailor.conf.hide_stack_trace then
             page:write("<pre>Error 500: Internal Server Error</pre>")
             return 500
         end
         page:write("<pre>"..traceback(msg,2).."</pre>")
+    end
+    -- Error for controller or action not found
+    local function error_404()
+        local _, res
+        if conf.sailor.default_error404 and conf.sailor.default_error404 ~= '' then
+            page.controller_view_path = nil
+            _, res = xpcall(function () page:render(conf.sailor.default_error404) end, error_handler)
+            return res or httpd.OK or page.r.status or 200
+        end
+        page.r.status = 404
+        return res or page.r.status
     end
 
     -- If a default static page is configured, run it and prevent routing
@@ -174,16 +174,14 @@ function sailor.route(page)
             controller, action = match(route_name, "([^/]+)/?([^/]*)")
         end
 
-        if controller == "autogen" then 
-            if conf.sailor.enable_autogen then
-                local _,res = xpcall(function () autogen(page) end, error_handler)
-                return res or httpd.OK or page.r.status or 200
-            end
-            return error_404()
+        if conf.sailor.enable_autogen and controller == "autogen" then
+            local _,res = xpcall(function () autogen(page) end, error_handler)
+            return res or httpd.OK or page.r.status or 200
         end
 
         local ctr
-        local _, res = xpcall(function() ctr = require("controllers."..controller) end, error_handler)
+        _, res = xpcall(function() ctr = require("controllers."..controller) end, error_404)
+        
         if ctr then
             local custom_path = ctr.path or (ctr.conf and ctr.conf.path)
             page.controller_view_path = (custom_path and custom_path..'/views/'..controller) or 'views/'..controller
@@ -195,7 +193,7 @@ function sailor.route(page)
             if not ctr[action] then return error_404() end
 
             -- run action
-            _, res = xpcall(function() return ctr[action](page) end, error_handler)
+            local _, res = xpcall(function() return ctr[action](page) end, error_handler)
             if res == 404 then return error_404() end
         end
 
